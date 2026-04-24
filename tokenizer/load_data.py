@@ -1,245 +1,210 @@
 
-# Responsibility: pull raw math text into memory and format every
-# problem/solution pair into a consistent string template before the
-# tokenizer ever sees it.
+# Responsibility: pull raw text into memory from various sources.
+# For a general LLM this means: plain text files, Wikipedia dumps,
+# books, web-scraped content, or custom JSON datasets.
 
+from __future__ import annotations
 import os
 import json
 import random
-from pathlib import Path
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pathlib import Path 
 
-# ── Template ───────────────────────
-TEMPLATE = (
-    "<BOS>[PROBLEM] {problem} "
-    "[SOLUTION]{steps}"
-    "[ANSWER] {answer}<EOS>"
-)
-
-STEP_SEP = " [STEP] "       # separates individual solution steps
-
-def format_sample(problem: str, steps: list[str], answer: str) -> str:
-    """
-    Convert a structured problem dict into a single formatted string.
-    The model learns the token boundaries  <BOS> … [PROBLEM] … [SOLUTION]
-    … [STEP] … [ANSWER] … <EOS>  purely from seeing many examples.
-    """
-    steps_str = STEP_SEP.join(s.strip() for s in steps) if steps else ""
-    if steps_str:
-        steps_str = STEP_SEP + steps_str + " "
-    return TEMPLATE.format(
-        problem=problem.strip(),
-        steps=steps_str,
-        answer=answer.strip()
-    )
-
-# ── Loaders for common open datasets ─────────────────
-def load_gsm8k(path: str) -> list[str]:
-    """
-    Load GSM8K-style JSONL files.
-    Each line: {"question": "...", "answer": "..."}
-    The answer field in GSM8K contains step-by-step reasoning separated
-    by '\\n', with the final number after '####'.
- 
-    Download: https://github.com/openai/grade-school-math
-    """
-    samples = []
-    with open(path, "r") as f:
-        for line in f:
-            obj = json.loads(line.strip())
-            question = obj["question"]
-            raw_answer = obj["answer"]
-
-            # Split reasoning steps from final answer
-            if '####' in raw_answer:
-                reasoning, final = raw_answer.split("####")
-                steps = [s.strip() for s in reasoning.strip().split("\n") if s.strip()]
-                answer = final.strip()
-            else:
-                step= []
-                answer = raw_answer.strip()
-            
-            samples.append(format_sample(question, steps, answer))
-    return samples
-
-def load_math_dataset(path: str) -> list[str]:
-    """
-    Load the MATH dataset (Hendrycks et al., 2021).
-    Each problem is a JSON file:  {"problem": "...", "solution": "...", "answer": "..."}
- 
-    Directory structure expected:
-        path/
-          algebra/problem1.json
-          geometry/problem2.json ...
- 
-    Download: https://github.com/hendrycks/math
-    """
-    samples = []
-    for json_path in Path(path).rglob("*.json"):
-        with open(json_path) as f:
-            obj = json.load(f)
-        problem = obj.get("problem", "")
-        solution = obj.get("solution", "")
-        answer = obj.get("answer", "")
-        # Treat the full solution as one step (no sub-steps in this dataset)
-        samples.append(format_sample(problem, [solution], answer))
-    return samples
-
+# ── Loaders ───────────────────────
 def load_plain_text(path: str) -> list[str]:
     """
-    Fallback: load a plain .txt file where each non-empty line is
-    treated as one training sample (no special structure assumed).
-    Useful for custom scraped data or textbook passages.
+    Load a .txt file. Each non-empty paragraph (blank-line separated) becomes
+    one training document. Falls back to line-by-line if no blank lines found.
     """
     with open(path, "r", encoding="utf-8") as f:
-        lines = [l.strip() for l in f if l.strip()]
-    return lines
+        content = f.read()
 
-def load_custom_json(path: str) -> list[str]:
-    """
-    Load a custom JSON file in the format:
-    [
-      {
-        "problem":  "What is 2 + 2?",
-        "steps":    ["Think about it.", "2 and 2 make 4."],
-        "answer":   "4"
-      },
-      ...
-    ]
-    """
-    with open(path, "r") as f:
-        data = json.load(f)
-    return [
-        format_sample(
-            obj.get("problem", ""),
-            obj.get("steps", []).
-            obj.get("answer", ""),
-        )
-        for obj in data
-    ]
+    # Try paragraph splitting first
+    paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+    if len(paragraphs) > 1:
+        return paragraphs
+    
+    # Fallback: line by line
+    return [line.strip() for line in content.splitlines() if line.strip()]
 
-# ── Synthetic fallback data ────────
-def generate_synthetic_arithmetic(n: int = 5000, seed: int = 42) -> list[str]:
+def load_jsonl(path: str, text_key: str = "text") -> list[str]:
     """
-    Generate n simple arithmetic problems so you can run the full pipeline
-    immediately, before downloading any real dataset.
+    Load a .jsonl file (one JSON object per line).
+    Looks for a field named text_key in each object.
  
-    Covers: addition, subtraction, multiplication, integer division,
-            linear equations, and basic fractions.
+    Compatible with: OpenWebText, The Pile, C4, custom datasets.
+    Each line expected: {"text": "...", ...}
+    """
+    docs = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                text = obj.get(text_key, "").strip()
+                if text:
+                    docs.append(text)
+            except json.JSONDecodeError:
+                continue
+    return docs
+
+def load_json(path: str, text_key: str = "text") -> list[str]:
+    """
+    Load a .json file containing a list of objects or a list of strings.
+ 
+    Formats supported:
+        ["doc1 text", "doc2 text", ...]
+        [{"text": "doc1 text"}, {"text": "doc2 text"}, ...]
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+ 
+    docs = []
+    for item in data:
+        if isinstance(item, str):
+            if item.strip():
+                docs.append(item.strip())
+        elif isinstance(item, dict):
+            text = item.get(text_key, "").strip()   # FIX: was `.` instead of `,`
+            if text:
+                docs.append(text)
+    return docs
+ 
+ 
+def load_directory(path: str, extensions: tuple = (".txt",)) -> list[str]:
+    """
+    Recursively load all text files in a directory.
+    Each file becomes one document.
+    """
+    docs = []
+    for file_path in Path(path).rglob("*"):
+        if file_path.suffix in extensions:
+            try:
+                text = file_path.read_text(encoding="utf-8").strip()
+                if text:
+                    docs.append(text)
+            except (UnicodeDecodeError, OSError):
+                continue
+    return docs
+
+def load_huggingface(dataset_name: str, split: str = "train",
+                     text_key: str = "text", max_samples: int | None = None) -> list[str]:
+    """
+    Load from HuggingFace datasets (requires: pip install datasets).
+ 
+    Examples:
+        load_huggingface("wikitext", ...)    — Wikipedia text
+        load_huggingface("bookcorpus", ...)  — Books
+        load_huggingface("c4", ...)          — Web text
+ 
+    Note: some datasets need a config name, e.g.:
+        datasets.load_dataset("wikitext", "wikitext-103-raw-v1")
+    """
+    try:
+        from datasets import load_dataset
+    except:
+        raise ImportError("Run: pip install datasets")
+    
+    ds = load_dataset(dataset_name, split=split)
+    docs = [row[text_key].strip() for row in ds if row[text_key].strip()]
+
+    if max_samples:
+        docs = docs[:max_samples]
+    return docs
+
+# ── Synthetic fallback ─────────
+def generate_synthetic_text(n: int = 2000, seed: int = 42) -> list[str]:
+    """
+    Generate simple synthetic text so the pipeline runs immediately with
+    no external data. Covers diverse sentence patterns.
+    Replace with real data before serious training.
     """
     random.seed(seed)
-    samples = []
+    subjects  = ["The cat", "A dog", "She", "He", "The team", "The model", "An idea"]
+    verbs     = ["runs", "sees", "builds", "finds", "creates", "understands", "explores"]
+    objects   = ["the house", "a new path", "the answer", "something unexpected", "a solution"]
+    adverbs   = ["quickly", "carefully", "slowly", "easily", "often", "rarely"]
+    connectors= ["However,", "Therefore,", "In addition,", "As a result,", "Meanwhile,"]
+
+    docs = []
     for _ in range(n):
-        kind = random.choice(["add", "sub", "mul", "div", "linear", "fraction"])
+        # Vary dodcument length
+        n_sentences = random.randint(2,6)
+        sentences = []
+        for _ in range(n_sentences):
+            s = f"{random.choice(subjects)} {random.choice(verbs)} {random.choice(objects)} {random.choice(adverbs)}."
+            if random.random() > 0.6:
+                s = random.choice(connectors) + " " + s
+            sentences.append(s)
+        docs.append(" ".join(sentences))
+ 
+    return docs
 
-        if kind == "add":
-            a, b = random.randint(1, 999), random.randint(1, 999)
-            problem = f"Calculate {a} + {b}"
-            steps = f"Add {a} and {b} together."
-            answer = str(a + b)
-
-        elif kind == "sub":
-            a, b = random.randint(1, 999), random.randint(1, 999)
-            lo, hi = min(a, b), max(a, b)
-            problem = f"Calculate: {hi} - {lo}"
-            steps   = [f"Subtract {lo} from {hi}."]
-            answer  = str(hi - lo)
- 
-        elif kind == "mul":
-            a, b = random.randint(1, 99), random.randint(1, 99)
-            problem = f"Calculate: {a} × {b}"
-            steps   = [f"Multiply {a} by {b}."]
-            answer  = str(a * b)
- 
-        elif kind == "div":
-            b = random.randint(1, 20)
-            a = b * random.randint(1, 50)
-            problem = f"Calculate: {a} ÷ {b}"
-            steps   = [f"Divide {a} by {b}."]
-            answer  = str(a // b)
- 
-        elif kind == "linear":
-            # ax + b = c  →  x = (c - b) / a
-            a = random.randint(1, 10)
-            x = random.randint(-20, 20)
-            b = random.randint(-50, 50)
-            c = a * x + b
-            problem = f"Solve for x:  {a}x + ({b}) = {c}"
-            steps   = [
-                f"Subtract {b} from both sides: {a}x = {c - b}",
-                f"Divide both sides by {a}: x = {(c - b) // a}",
-            ]
-            answer  = f"x = {x}"
-        
-        else: # fraction
-            num = random.randint(1, 10)
-            den = random.randint(2, 20)
-            problem = f"Simplify the fraction: {num*2}/{den*2}"
-            from math import gcd
-            g = gcd(num*2, den*2)
-            steps = [f"Find GCD({num*2}, {den*2}) = {g}",
-                       f"Divide numerator and denominator by {g}."]
-            answer  = f"{(num*2)//g}/{(den*2)//g}"
- 
-        samples.append(format_sample(problem, steps, answer))
- 
-    return samples
-
-# ── Main entry point ────────
+# ── Master loader ────────
 def load_corpus(cfg) -> list[str]:
     """
-    Master loader: tries real datasets first, falls back to synthetic data.
-    Returns a list of formatted strings ready for the tokenizer.
+    Try all supported data sources in order. Falls back to synthetic text.
+    Returns a shuffled list of document strings.
     """
-    samples: list[str] = []
+    docs: list[str] = []
 
-    # Try GSM8K
-    gsm_path = "data/gsm8k_train.json1"
-    if os.path.exists(gsm_path):
-        gsm = load_gsm8k(gsm_path)
-        samples.extend(gsm)
-        print(f" [load_data] Loaded {len(gsm):,} GSM8K samples")
+    # 1. Plain text file (drop-in: just put a .txt in data/)
+    if os.path.exists(cfg.raw_data_path):
+        loaded = load_plain_text(cfg.raw_data_path)
+        docs.extend(loaded)
+        print(f"  [load_data] Loaded {len(loaded):,} docs from {cfg.raw_data_path}")
     
-    # Try MATH dataset
-    math_path = "data/MATH"
-    if os.path.exists(math_path):
-        math = load_math_dataset(math_path)
-        samples.extend(math)
-        print(f" [load_data] Loaded {len(math):,} MATH dataset samples")
-    
-    # Try custom JSON
-    custom_path = "data/custom_math.json"
-    if os.path.exists(custom_path):
-        custom = load_custom_json(custom_path)
-        samples.extend(custom)
-        print(f"  [load_data] Loaded {len(custom):,} custom samples")
+    # 2. JSONL (OpenWebText style)
+    for fname in ["data/train.jsonl", "data/corpus.jsonl"]:
+        if os.path.exists(fname):
+            loaded = load_jsonl(fname)
+            docs.extend(loaded)
+            print(f"  [load_data] Loaded {len(loaded):,} docs from {fname}")
  
-    # Fallback: synthetic arithmetic
-    if not samples:
-        print("  [load_data] No external datasets found — generating synthetic arithmetic...")
-        samples = generate_synthetic_arithmetic(n=5000)
-        print(f"  [load_data] Generated {len(samples):,} synthetic samples")
+    # 3. JSON list
+    for fname in ["data/train.json", "data/corpus.json"]:
+        if os.path.exists(fname):
+            loaded = load_json(fname)
+            docs.extend(loaded)
+            print(f"  [load_data] Loaded {len(loaded):,} docs from {fname}")
  
-    random.shuffle(samples)
-    return samples
-
-def save_corpus(samples: list[str], path: str) -> None:
-    """Write all formatted samples to a single text file, one sample per line."""
-    os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
+    # 4. Directory of text files
+    if os.path.isdir("data/texts"):
+        loaded = load_directory("data/texts")
+        docs.extend(loaded)
+        print(f"  [load_data] Loaded {len(loaded):,} docs from data/texts/")
+ 
+    # 5. Synthetic fallback
+    if not docs:
+        print("  [load_data] No data found — generating synthetic text...")
+        docs = generate_synthetic_text(n=2000)
+        print(f"  [load_data] Generated {len(docs):,} synthetic docs")
+ 
+    random.shuffle(docs)
+    return docs
+ 
+def save_corpus(docs: list[str], path: str) -> None:
+    """Write all documents to a flat text file — one document per line."""
+    dirpath = os.path.dirname(path)
+    if dirpath:
+        os.makedirs(dirpath, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(samples))
-    print(f" [load_data] Corpus saved -> {path}  ({len(samples):,} samples)")
+        # Collapse internal newlines so each document is truly one line
+        f.write("\n".join(doc.replace("\n", " ") for doc in docs))
+    print(f"  [load_data] Corpus saved → {path}  ({len(docs):,} docs)")
 
-# ── Quick test ─────
+# ── Quick test ───────────────
+
 if __name__ == "__main__":
-    from config import cfg
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from config import cfg  
 
-    samples = load_corpus(cfg)
-    save_corpus(samples, cfg.raw_data_path)
-    print(f"\nSample 0:\n{samples[0]}")
-    print(f"\nSample 1:\n{samples[1]}")
+    docs = load_corpus(cfg)
+    save_corpus(docs, cfg.raw_data_path)
+    print(f"\n--- Sample 0 ---\n{docs[0][:200]}")
+    print(f"\n--- Sample 1 ---\n{docs[1][:200]}")
 
 
 
