@@ -197,9 +197,7 @@ def save_corpus(docs: list[str], path: str) -> None:
 # ── Quick test ───────────────
 
 if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from config import cfg  
+    from minigpt.config import cfg 
 
     docs = load_corpus(cfg)
     save_corpus(docs, cfg.raw_data_path)

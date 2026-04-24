@@ -18,15 +18,24 @@ import json
 import unicodedata
 from collections import Counter
 from pathlib import Path
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import SPECIAL_TOKENS
+from minigpt.config import SPECIAL_TOKENS
 
 # ── Base vocabulary components ────────────────────────────────────────────────
  
 # Common punctuation and operators — always single tokens, never merged
 BASE_PUNCTUATION = list("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
- 
+
+EOW = "</w>"
+
+def has_eow(token: str) -> bool:
+    return token.endswith(EOW)
+
+def strip_eow(token: str) ->str:
+    return token[:-len(EOW)] if token.endswith(EOW) else token
+
+def is_digit_token(token: str) -> bool:
+    return strip_eow(token).isdigit()
+
 # GPT-2 style pre-tokenization pattern:
 # Handles contractions ('s, 't, 're …), words, punctuation, whitespace
 PRETOKENIZE_PATTERN = re.compile(
@@ -105,24 +114,18 @@ class Tokenizer:
     # ══════════════════════════════════════════════════════════════════════════
     def to_base_chars(self, pre_tokens: list[str]) -> list[str]:
         """
-        Split each pre-token into individual characters, appending </w>
-        to the last character of each pre-token to mark word boundaries.
- 
-        Example:
-            ["hello", " world"] → ["h","e","l","l","o</w>", " ","w","o","r","l","d</w>"]
- 
-        Why </w>?
-          BPE learns merges like ("e","r") → "er".  Without a boundary marker,
-          "er" at the END of "merger" and "er" at the START of "erase" would
-          be treated identically.  The </w> suffix lets BPE distinguish them,
-          so "r</w>" only merges with tokens that end a word.
+        Split each pre-token into characters and mark the end of each pre-token
+        with </w>. BPE training should not merge across tokens ending in </w>.
         """
         chars: list[str] = []
-        for word in pre_tokens:
-            if not word:
+        for token in pre_tokens:
+            if not token:
                 continue
-            # Mark the last character as end-of-word
-            chars.extend(list(word))
+        
+            chars_list = list(token)
+            chars_list[-1] = chars_list[-1] + EOW
+            chars.extend(chars_list)
+
         return chars
     
     # ══════════════════════════════════════════════════════════════════════════
@@ -210,6 +213,7 @@ class Tokenizer:
             parts.append(tok)
 
         text = "".join(parts)
+        text = text.replace("</w>", "")
         return text.strip()
     
     # ── Vocabulary construction ───────────
@@ -218,15 +222,29 @@ class Tokenizer:
         vocab: list[str] = []
 
         vocab.extend(SPECIAL_TOKENS)
-        vocab.extend([str(d) for d in range(10)])  # digits 0–9
-        vocab.extend([chr(c) for c in range(ord("A"), ord("Z") + 1)]) # A–Z
-        vocab.extend([chr(c) for c in range(ord("a"), ord("z") + 1)]) # a–z
+        vocab.extend([str(d) for d in range(10)])
+        vocab.extend([chr(c) for c in range(ord("A"), ord("Z") + 1)])
+        vocab.extend([chr(c) for c in range(ord("a"), ord("z") + 1)])
         vocab.extend(BASE_PUNCTUATION)
         vocab.extend([" ", "\n", "\t"])
- 
+
+        # End-of-pre-token variants.
+        for c in range(ord("a"), ord("z") + 1):
+            vocab.append(chr(c) + EOW)
+        for c in range(ord("A"), ord("Z") + 1):
+            vocab.append(chr(c) + EOW)
+        for d in range(10):
+            vocab.append(str(d) + EOW)
+        for p in BASE_PUNCTUATION:
+            vocab.append(p + EOW)
+
         return vocab
 
-    def build_vocab(self, extra_tokens: list[str] | None = None) -> None:
+    def build_vocab(
+        self,
+        extra_tokens: list[str] | None = None,
+        corpus: list[str] | None = None
+    ) -> None:
         """
         Construct stoi / itos from: base vocab + corpus extras + BPE merge tokens.
         Called once after BPE training is complete.
@@ -241,6 +259,11 @@ class Tokenizer:
         
         for t in self._base_vocab():
             add(t)
+        
+        if corpus:
+            for doc in corpus:
+                for token in self.to_base_chars(self.pre_tokenize(self.normalize(doc))):
+                    add(token)
         
         if extra_tokens:
             for t in extra_tokens:
@@ -297,9 +320,13 @@ class Tokenizer:
                     b = tokens[i+1]
                     # Never merge across word boudnaries or special tokens
                     if (
-                        a in SPECIAL_TOKENS or b in SPECIAL_TOKENS
-                        or a.isdigit()
-                        or b.isdigit()
+                        a in SPECIAL_TOKENS 
+                        or b in SPECIAL_TOKENS
+                        or is_digit_token(a)
+                        or is_digit_token(b)
+                        or a == " "
+                        or b == " "
+                        or has_eow(a)
                     ):
                         continue
                     pair_counts[(a, b)] += 1
@@ -334,7 +361,7 @@ class Tokenizer:
         print(f"  [tokenizer] BPE training done. {len(self.bpe_merges):,} merges learned.")
 
     # ── Utility helpers ───────────────────────────────────────────────────────
- 
+
     def batch_encode(self, texts: list[str], max_len: int | None = None,
                      pad: bool = True) -> list[list[int]]:
         encoded = [self.encode(t) for t in texts]
@@ -388,39 +415,7 @@ class Tokenizer:
         return (f"Tokenizer(vocab_size={self.vocab_size}, "
                 f"bpe_merges={len(self.bpe_merges)}, lowercase={self.lowercase})")
  
- 
-# ── Quick test ────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    tok = Tokenizer(lowercase=False)
 
-    # small demo corpus - train BPE on it
-    demo_corpus = [
-        "The quick brown fox jumps over the lazy dog.",
-        "Hello world! This is a test.",
-        "Language models learn from large amounts of text.",
-        "Transformers are powerful sequence-to-sequence models.",
-    ] * 10   # repeat so BPE has enough frequency counts
-
-    tok.train_bpe(demo_corpus, num_merges=50)
-    tok.build_vocab()
-
-    tests = [
-        "Hello world!",
-        "The quick brown fox.",
-        "Language models are powerful.",
-    ]
-
-    print()
-    for text in tests:
-        ids = tok.encode(text)
-        tokens = [tok.id_to_token(i) for i in ids]
-        back = tok.decode(ids)
-        match = "✅" if back.strip() == text.strip() else "⚠️ "
-        print(f"{match} Original:  {text!r}")
-        print(f"   Tokens:    {tokens}")
-        print(f"   IDs:       {ids}")
-        print(f"   Decoded:   {back!r}")
-        print()
 
     
 

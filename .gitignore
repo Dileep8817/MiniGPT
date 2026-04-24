@@ -1,2 +1,49 @@
-venv/
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Packaging/build artifacts
+*.egg-info/
+src/*.egg-info/
+build/
+dist/
+
+# Test/cache artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# OS/editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Model/data artifacts
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+data/tokenizer.json
+data/corpus.txt
+
+# Env/secrets
+.env
+.env.*
+
+# Logs
+*.log
+
+# Generated data
+data/*
+!data/.gitkeep
+!data/README.md
+!data/examples/
