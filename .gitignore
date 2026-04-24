@@ -1,4 +1,2 @@
 venv/
 .venv/
-
-tokenizer/create_tokenizer.py
