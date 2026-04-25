@@ -19,11 +19,17 @@ SPECIAL_TOKENS = [
 class LLMConfig:
     # ──── Tokenizer ──────────────────────────
     vocab_size: int = 8000   # target BPE vocab size (updated after training)
-    bpe_num_merges: int = 7000    # how many BPE merge rules to learn
+    bpe_num_merges: int = 1000    # how many BPE merge rules to learn
     lowercase: bool = False # normalize to lowercase before tokenizing
     # (set True for case-insensitive models; False preserves proper nouns)
 
-    # ──── Architecture ──────────────────────────
+    # ── Architecture ──────────────────────────────────────────────────────────
+    context_len: int   = 512     # max tokens the model sees at once
+    n_layers: int   = 6       # number of stacked transformer blocks
+    n_heads: int   = 8       # attention heads (d_model must be divisible)
+    d_model: int   = 512     # embedding dimension
+    d_ff:   int   = 2048    # feed-forward hidden size (4 × d_model)
+    dropout: float = 0.1
 
     # ── Paths ─────────────────────────────────────────────────────────────────
     raw_data_path:   str   = "data/corpus.txt"
