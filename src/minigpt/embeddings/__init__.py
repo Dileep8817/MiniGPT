@@ -5,9 +5,11 @@ from minigpt.embeddings.positional_encoding import (
     LearnedPositionalEncoding,
     SinusoidalPositionalEncoding
 )
+from minigpt.embeddings.embedding import GPTEmbedding
 
 __all__ = [
     "TokenEmbedding",
     "LearnedPositionalEncoding",
-    "SinusoidalPositionalEncoding"
+    "SinusoidalPositionalEncoding",
+    "GPTEmbedding"
 ]

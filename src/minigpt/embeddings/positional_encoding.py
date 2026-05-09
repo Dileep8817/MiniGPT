@@ -55,7 +55,7 @@ if __name__ == "__main__":
     out = pe(32)
     assert out.shape == (32, 512)
 
-    n_trainable = sum(p.numel() for p in pe.parameters() if p.requires_grad())
+    n_trainable = sum(p.numel() for p in pe.parameters() if p.requires_grad)
     assert n_trainable == 0, f"sinusoidal PE should have 0 trainable params, got {n_trainable}"
 
     assert "pe" in dict(pe.named_buffers())
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     tok = TokenEmbedding(cfg.vocab_size, cfg.d_model)
     pe_mod = SinusoidalPositionalEncoding(cfg.context_len, cfg.d_model)
     ids = torch.randint(0, cfg.vocab_size, (4,32))
-    combined = tok(ids) + pe(32)
+    combined = tok(ids) + pe_mod(32)
     assert combined.shape == (4, 32, cfg.d_model)
 
 
