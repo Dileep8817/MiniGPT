@@ -353,7 +353,7 @@ class Tokenizer:
                         i += 1
                 new_data.append(new_tokens)
             data = new_data
-            if merge_idx % 50 == 0:
+            if merge_idx % 100 == 0:
                 freq = pair_counts[best_pair]
                 print(f"    merge {merge_idx:>5}: {best_pair[0]!r} + {best_pair[1]!r}"
                       f" → {merged!r}   (freq={freq:,})")

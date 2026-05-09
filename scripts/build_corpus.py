@@ -9,7 +9,7 @@ def clean_text(text: str) -> str:
     text = " ".join(text.split())
     return text.strip()
 
-def collect_wikitext(max_samples: int = 100_000) -> list[str]:
+def collect_wikitext(max_samples: int = 50_000) -> list[str]:
     ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
 
     docs = []
@@ -22,7 +22,7 @@ def collect_wikitext(max_samples: int = 100_000) -> list[str]:
 
     return docs
 
-def collect_tinystories(max_samples: int = 100_000) -> list[str]:
+def collect_tinystories(max_samples: int = 50_000) -> list[str]:
     ds = load_dataset("roneneldan/TinyStories", split="train")
 
     docs = []
