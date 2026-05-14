@@ -36,8 +36,8 @@ class CausalMultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(d_model, d_model)
 
         for proj in (self.q_proj, self.k_proj, self.v_proj, self.out_proj):
-            nn.init.normal(proj.weight, mean=0.0, std=0.02)
-            nn.init.zeros(proj.bias)
+            nn.init.normal_(proj.weight, mean=0.0, std=0.02)
+            nn.init.zeros_(proj.bias)
         
         self.attn_dropout = nn.Dropout(dropout)
         self.resid_dropout = nn.Dropout(dropout)

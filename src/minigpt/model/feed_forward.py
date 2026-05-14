@@ -13,6 +13,7 @@
 # No communication occurs across sequence positions here —
 # token interaction happens only in the attention mechanism.
 # ──────────────────────────────────────────────────────────────────────────
+from __future__ import annotations
 
 import torch
 import torch.nn as nn
@@ -33,11 +34,11 @@ class FeedForward(nn.Module):
         self.d_ff = d_ff or 4*d_model
         self.d_model = d_model
         
-        self.fc1 = nn.Linear(d_model, d_ff)
+        self.fc1 = nn.Linear(d_model, self.d_ff)
         self.gelu = nn.GELU()
         self.act_dropout = nn.Dropout(dropout)
         self.out_dropout = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(d_ff, d_model)
+        self.fc2 = nn.Linear(self.d_ff, d_model)
 
         for proj in (self.fc1, self.fc2):
             nn.init.normal_(proj.weight, mean = 0.0, std = 0.02)
