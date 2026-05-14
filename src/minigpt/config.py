@@ -21,7 +21,6 @@ class LLMConfig:
     vocab_size: int = 8000   # target BPE vocab size (updated after training)
     bpe_num_merges: int = 1000    # how many BPE merge rules to learn
     lowercase: bool = False # normalize to lowercase before tokenizing
-    # (set True for case-insensitive models; False preserves proper nouns)
 
     # ── Architecture ──────────────────────────────────────────────────────────
     context_len: int   = 512     # max tokens the model sees at once
@@ -30,6 +29,7 @@ class LLMConfig:
     d_model: int   = 512     # embedding dimension
     d_ff:   int   = 2048    # feed-forward hidden size (4 × d_model)
     dropout: float = 0.1
+    pos_type: str = "learned"
 
     # ── Paths ─────────────────────────────────────────────────────────────────
     raw_data_path:   str   = "data/corpus.txt"
@@ -38,4 +38,5 @@ class LLMConfig:
 
 # ── Shared default instance ───────────────────────────────────────────────────
 cfg = LLMConfig()
+
 
