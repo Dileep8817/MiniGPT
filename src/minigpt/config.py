@@ -36,6 +36,23 @@ class LLMConfig:
     tokenizer_path:  str   = "data/tokenizer.json"
     checkpoint_dir:  str   = "checkpoints/"
 
+    # ── Training ────────────────────────────────────────────────
+    batch_size:          int   = 16
+    grad_accum_steps:    int   = 4
+    max_steps:           int   = 2000
+    warmup_steps:        int   = 100
+    max_lr:              float = 3e-4
+    min_lr:              float = 3e-5
+    weight_decay:        float = 0.1
+    grad_clip:           float = 1.0
+    log_every:           int   = 10
+    eval_every:          int   = 200
+    save_every:          int   = 500
+    val_split:           float = 0.1
+    use_bf16:            bool  = True
+    use_grad_checkpoint: bool  = False
+    use_sdpa:            bool  = True
+
 # ── Shared default instance ───────────────────────────────────────────────────
 cfg = LLMConfig()
 
