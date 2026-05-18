@@ -37,47 +37,39 @@ import torch.nn as nn
 
 from minigpt.model.attention import CausalMultiHeadAttention
 from minigpt.model.feed_forward import FeedForward
+from minigpt.model.rms_norm import RMSNorm
 
 class TransformerBlock(nn.Module):
     """
-    Pre-norm GPT transformer block.
-
-    Combines:
-        • causal multi-head self-attention
-        • position-wise feed-forward network
-
-    with residual connections and LayerNorm.
+    Pre-norm GPT block (Llama-style):
+        x = x + Attention(RMSNorm(x))
+        x = x + FFN(RMSNorm(x))
     """
-    
     def __init__(
             self,
             d_model: int,
             n_heads: int,
-            context_len: int,
-            d_ff: int | None = None,
+            d_ff: int,
+            rotary,
             dropout: float = 0.1
     ):
         super().__init__()
         
         self.d_model = d_model
-        self.n_heads = n_heads
-        self.d_ff = d_ff or 4*d_model
-
-        self.ln1 = nn.LayerNorm(d_model) # pre-norm before attention
+        self.ln1 = RMSNorm(d_model) # pre-norm before attention
         self.attn = CausalMultiHeadAttention(
             d_model=d_model,
             n_heads=n_heads,
-            context_len=context_len,
+            rotary=rotary,
             dropout=dropout
         ) # multi-head self-attention with causal mask
-
-        self.ln2 = nn.LayerNorm(d_model) # seperate normalization before FFN
-        self.ff = FeedForward(
+        self.ln2 = RMSNorm(d_model)
+        self.ff =FeedForward(
             d_model=d_model,
             d_ff=d_ff,
             dropout=dropout
         )
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         assert x.dim() == 3
         assert x.size(-1) == self.d_model

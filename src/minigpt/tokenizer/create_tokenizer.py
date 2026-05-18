@@ -286,78 +286,130 @@ class Tokenizer:
     # ── BPE Training  ────────
     def train_bpe(self, corpus: list[str], num_merges: int = 7000) -> None:
         """
-        Learn BPE merge rules from a corpus.
- 
-        Algorithm:
-          1. Tokenize every document into base characters (steps 1–3)
-          2. Count all adjacent token pairs
-          3. Merge the most frequent pair everywhere in the corpus
-          4. Record the merge rule
-          5. Repeat num_merges times (or until no pairs remain)
- 
-        Constraints — pairs are NEVER merged across:
-          • Special tokens
-          • The </w> boundary (word boundaries are always preserved)
-          • Digit tokens (digits stay individual so arithmetic works)
-        """
-        print(f"  [tokenizer] Training BPE ({num_merges} merges)...")
+        Fast BPE training: word-frequency aggregation + incremental pair counter
+        + reverse index from pair → words containing it.
 
-        # Pre-process corpus into lists of base characaters
-        data: list[list[str]] = []
+        Same merge rules, same blocking constraints as the original, but
+        O(unique_words × avg_merges_per_word) instead of O(corpus × num_merges).
+        """
+        print(f"  [tokenizer] Training BPE ({num_merges} merges, fast)...")
+
+        # ── 1. Aggregate pre-tokens into a word-frequency dict ────────────────
+        # Each "word" = tuple of base char-tokens (last char carries </w>).
+        word_counts: Counter[tuple[str, ...]] = Counter()
         for doc in corpus:
             norm = self.normalize(doc)
-            pre = self.pre_tokenize(norm)
-            chars = self.to_base_chars(pre)
-            if chars:
-                data.append(chars)
-        
+            for token in self.pre_tokenize(norm):
+                if not token:
+                    continue
+                chars = list(token)
+                chars[-1] = chars[-1] + EOW
+                word_counts[tuple(chars)] += 1
+
+        # words[i] is a *mutable* list of tokens for unique word i; counts[i] = freq
+        words: list[list[str]] = [list(w) for w in word_counts]
+        counts: list[int] = list(word_counts.values())
+        print(f"  [tokenizer] {len(words):,} unique pre-tokens "
+            f"(from {sum(counts):,} total)")
+
+        # ── 2. Helper: is this pair forbidden? ─────────────────────────────────
+        def blocked(a: str, b: str) -> bool:
+            return (
+                a in SPECIAL_TOKENS or b in SPECIAL_TOKENS
+                or is_digit_token(a) or is_digit_token(b)
+                or a == " " or b == " "
+                or has_eow(a)
+            )
+
+        # ── 3. Initial pair counts + reverse index pair → {word indices} ──────
+        pair_counts: Counter = Counter()
+        pair_words: dict[tuple[str, str], set[int]] = {}
+        for wi, w in enumerate(words):
+            c = counts[wi]
+            for i in range(len(w) - 1):
+                p = (w[i], w[i + 1])
+                if blocked(*p):
+                    continue
+                pair_counts[p] += c
+                pair_words.setdefault(p, set()).add(wi)
+
+        # ── 4. Merge loop ──────────────────────────────────────────────────────
         for merge_idx in range(num_merges):
-            # Count addjacent pairs
-            pair_counts: Counter = Counter()
-            for tokens in data:
-                for i in range(len(tokens) - 1):
-                    a = tokens[i]
-                    b = tokens[i+1]
-                    # Never merge across word boudnaries or special tokens
-                    if (
-                        a in SPECIAL_TOKENS 
-                        or b in SPECIAL_TOKENS
-                        or is_digit_token(a)
-                        or is_digit_token(b)
-                        or a == " "
-                        or b == " "
-                        or has_eow(a)
-                    ):
-                        continue
-                    pair_counts[(a, b)] += 1
-            
             if not pair_counts:
-                print(f"  [tokenizer] No more pairs to merge at step {merge_idx}. Done.")
+                print(f"  [tokenizer] No more pairs to merge at step {merge_idx}.")
                 break
 
-            best_pair = pair_counts.most_common(1)[0][0]
+            # Pick the highest-frequency unblocked pair. Counter has no
+            # max-key shortcut, but max() over .items() is O(n_unique_pairs)
+            # which is way smaller than the corpus.
+            best_pair, best_freq = max(pair_counts.items(), key=lambda kv: kv[1])
+            if best_freq <= 0:
+                break
+
             self.bpe_merges.append(best_pair)
             merged = best_pair[0] + best_pair[1]
+            a, b = best_pair
 
-            # apply merge to entire dataset
-            new_data: list[list[str]] = []
-            for tokens in data:
-                new_tokens: list[str] = []
+            # Only the words containing best_pair are affected
+            affected = pair_words.pop(best_pair, set())
+            pair_counts.pop(best_pair, None)
+
+            for wi in affected:
+                w = words[wi]
+                c = counts[wi]
+
+                # Old pair multiset in this word (excluding blocked, excluding best_pair itself)
+                old_pairs = Counter()
+                for i in range(len(w) - 1):
+                    p = (w[i], w[i + 1])
+                    if blocked(*p) or p == best_pair:
+                        continue
+                    old_pairs[p] += 1
+
+                # Apply the merge greedily, left-to-right
+                new_w: list[str] = []
                 i = 0
-                while i <len(tokens):
-                    if i < len(tokens) - 1 and (tokens[i], tokens[i+1]) == best_pair:
-                        new_tokens.append(merged)
+                while i < len(w):
+                    if i < len(w) - 1 and w[i] == a and w[i + 1] == b:
+                        new_w.append(merged)
                         i += 2
                     else:
-                        new_tokens.append(tokens[i])
+                        new_w.append(w[i])
                         i += 1
-                new_data.append(new_tokens)
-            data = new_data
-            if merge_idx % 100 == 0:
-                freq = pair_counts[best_pair]
+                words[wi] = new_w
+
+                # New pair multiset
+                new_pairs = Counter()
+                for i in range(len(new_w) - 1):
+                    p = (new_w[i], new_w[i + 1])
+                    if blocked(*p):
+                        continue
+                    new_pairs[p] += 1
+
+                # Incremental update of pair_counts and pair_words
+                for p in old_pairs.keys() - new_pairs.keys():
+                    if p in pair_words:
+                        pair_words[p].discard(wi)
+                        if not pair_words[p]:
+                            pair_words.pop(p, None)
+                for p in new_pairs.keys() - old_pairs.keys():
+                    pair_words.setdefault(p, set()).add(wi)
+
+                delta = Counter(new_pairs)
+                delta.subtract(old_pairs)
+                for p, d in delta.items():
+                    if d == 0:
+                        continue
+                    pair_counts[p] += c * d
+                    if pair_counts[p] <= 0:
+                        pair_counts.pop(p, None)
+                        pair_words.pop(p, None)
+
+            if merge_idx % 500 == 0 or merge_idx == num_merges - 1:
                 print(f"    merge {merge_idx:>5}: {best_pair[0]!r} + {best_pair[1]!r}"
-                      f" → {merged!r}   (freq={freq:,})")
- 
+                    f" → {merged!r}   "
+                    f"(freq={best_freq:,}, n_pairs={len(pair_counts):,})")
+
         print(f"  [tokenizer] BPE training done. {len(self.bpe_merges):,} merges learned.")
 
     # ── Utility helpers ───────────────────────────────────────────────────────

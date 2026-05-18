@@ -18,8 +18,8 @@ SPECIAL_TOKENS = [
 @dataclass
 class LLMConfig:
     # ──── Tokenizer ──────────────────────────
-    vocab_size: int = 8000   # target BPE vocab size (updated after training)
-    bpe_num_merges: int = 1000    # how many BPE merge rules to learn
+    vocab_size: int = 16500   # target BPE vocab size (updated after training)
+    bpe_num_merges: int = 16000    # how many BPE merge rules to learn
     lowercase: bool = False # normalize to lowercase before tokenizing
 
     # ── Architecture ──────────────────────────────────────────────────────────
@@ -27,9 +27,9 @@ class LLMConfig:
     n_layers: int   = 6       # number of stacked transformer blocks
     n_heads: int   = 8       # attention heads (d_model must be divisible)
     d_model: int   = 512     # embedding dimension
-    d_ff:   int   = 2048    # feed-forward hidden size (4 × d_model)
+    d_ff:   int   = 1408     # SwiGLU: ~8/3 * d_model, rounded to multiple of 64
     dropout: float = 0.1
-    pos_type: str = "learned"
+    pos_type: str = "rope"
 
     # ── Paths ─────────────────────────────────────────────────────────────────
     raw_data_path:   str   = "data/corpus.txt"
@@ -37,8 +37,8 @@ class LLMConfig:
     checkpoint_dir:  str   = "checkpoints/"
 
     # ── Training ────────────────────────────────────────────────
-    batch_size:          int   = 16
-    grad_accum_steps:    int   = 4
+    batch_size:          int   = 32     # was 16
+    grad_accum_steps:    int   = 2      # was 4 — keeps effective batch = 64 unchanged
     max_steps:           int   = 2000
     warmup_steps:        int   = 100
     max_lr:              float = 3e-4

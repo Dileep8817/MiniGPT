@@ -18,12 +18,17 @@ class GPTEmbedding(nn.Module):
                  dropout: float, pos_type: str = "learned"):
         super().__init__()
         self.tok = TokenEmbedding(vocab_size, d_model)
-        if pos_type == "learned":
+        if pos_type == "rope":
+            # RoPE is applied inside attention, not added here.
+            self.pos = None
+        elif pos_type == "learned":
             self.pos = LearnedPositionalEncoding(context_len, d_model)
         elif pos_type == "sinusoidal":
             self.pos = SinusoidalPositionalEncoding(context_len, d_model)
         else:
-            raise ValueError(f"Unknown pos_type '{pos_type}'. Use 'learned' or 'sinusoidal'.")
+            raise ValueError(
+                f"Unknown pos_type '{pos_type}'. Use 'rope', 'learned', or 'sinusoidal'."
+            )
         self.drop = nn.Dropout(dropout)
         self._d_model = d_model
         self._vocab_size = vocab_size
@@ -44,7 +49,10 @@ class GPTEmbedding(nn.Module):
         # tok(ids): (B, T, d_model)
         # pos(T):      (T, d_model) — broadcasts across batch
         _, T = ids.shape    # batch size isn't needed
-        return self.drop(self.tok(ids) + self.pos(T))
+        tok = self.tok(ids)
+        if self.pos is not None:
+            tok = tok + self.pos(T)
+        return self.drop(tok)
 
     def __repr__(self) -> str:
         n = sum(p.numel() for p in self.parameters())

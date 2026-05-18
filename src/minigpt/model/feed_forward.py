@@ -1,56 +1,44 @@
-# FEED-FORWARD LAYER
-#
-# Feed-forward network used inside each transformer block.
-#
-# After attention mixes information across tokens, the FFN performs
-# nonlinear feature transformation independently on each token vector.
-#
-# This layer:
-#   1. Expands the representation into a larger feature space
-#   2. Applies a nonlinear activation (GELU)
-#   3. Projects back to d_model
-#
-# No communication occurs across sequence positions here —
-# token interaction happens only in the attention mechanism.
-# ──────────────────────────────────────────────────────────────────────────
+
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-class FeedForward(nn.Module):
+class SwiGLU(nn.Module):
     """
-    Position-wise transformer MLP.
-
-    Expands token representations into a higher-dimensional feature
-    space, applies nonlinear transformation, then projects back to
-    d_model.
-
-    Operates independently on each token position.
+    Position-wise SwiGLU feed-forward (Llama-style).
+    Replaces the GELU MLP with a gated linear unit:
+        FFN(x) = (silu(W_gate x) * (W_up x)) @ W_down
+    SwiGLU uses 3 matrices instead of GELU's 2. To keep total parameter
+    count comparable to a 2x GELU FFN at d_ff = 4 * d_model, choose
+    d_ff ~= (8/3) * d_model. For d_model = 512 the calling code uses
+    d_ff = 1408 (multiple of 64, hardware-friendly).
+    Biases are removed (Llama convention) — no quality cost, slightly
+    faster, fewer parameters.
     """
-    def __init__(self, d_model: int, d_ff: int | None = None, dropout:float = 0.1):
+    def __init__(self, d_model: int, d_ff: int, dropout:float = 0.1):
         super().__init__()
 
-        self.d_ff = d_ff or 4*d_model
+        self.d_ff = d_ff
         self.d_model = d_model
         
-        self.fc1 = nn.Linear(d_model, self.d_ff)
-        self.gelu = nn.GELU()
-        self.act_dropout = nn.Dropout(dropout)
-        self.out_dropout = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(self.d_ff, d_model)
+        self.w_gate = nn.Linear(d_model, d_ff, bias=False)
+        self.w_up = nn.Linear(d_model, d_ff, bias=False)
+        self.w_down = nn.Linear(d_ff, d_model, bias=False)
+        self.dropout = nn.Dropout(dropout)
 
-        for proj in (self.fc1, self.fc2):
-            nn.init.normal_(proj.weight, mean = 0.0, std = 0.02)
-            nn.init.zeros_(proj.bias)
+        nn.init.normal_(self.w_gate.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.w_up.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.w_down.weight, mean=0.0, std=0.02)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         assert x.dim() == 3
         assert x.size(-1) == self.d_model
         
-        x = self.fc1(x)           # (B, T, d_model) -> (B, T, d_ff)
-        x = self.gelu(x)
-        x = self.act_dropout(x)
-        x = self.fc2(x)           # (B, T, d_ff)    -> (B, T, d_model)
-        x = self.out_dropout(x)
-        return x
+        gated = F.silu(self.w_gate(x)) * self.w_up(x)
+        return self.dropout(self.w_down(gated))
+    
+# Backwards-compatible alias so transformer_block.py doesn't need to change
+# its import name even though the implementation is now SwiGLU.
+FeedForward = SwiGLU

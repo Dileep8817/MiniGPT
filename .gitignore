@@ -20,6 +20,7 @@ dist/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.mpl_cache/
 
 # OS/editor files
 .DS_Store

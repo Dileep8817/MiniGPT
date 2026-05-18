@@ -24,6 +24,8 @@ import torch.nn as nn
 from minigpt.config import LLMConfig
 from minigpt.embeddings.embedding import GPTEmbedding
 from minigpt.model.transformer_block import TransformerBlock
+from minigpt.model.rotary import RotaryEmbedding
+from minigpt.model.rms_norm import RMSNorm
 
 class MiniGPT(nn.Module):
     """A small GPT-style decoder-only language model."""
@@ -32,24 +34,29 @@ class MiniGPT(nn.Module):
 
         self.cfg = cfg
         self.embedding = GPTEmbedding.from_config(cfg)
+
+        d_head = cfg.d_model // cfg.n_heads
+        self.rotary = RotaryEmbedding(d_head=d_head, max_seq_len=cfg.context_len)
+
         self.blocks = nn.ModuleList([
             TransformerBlock(
                 d_model=cfg.d_model,
                 n_heads=cfg.n_heads,
                 d_ff=cfg.d_ff,
-                context_len=cfg.context_len,
+                rotary = self.rotary,
                 dropout=cfg.dropout
             ) 
             for _ in range(cfg.n_layers)
         ])
-        self.ln_f = nn.LayerNorm(cfg.d_model)
+        self.ln_f = RMSNorm(cfg.d_model)
         self.head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         
         # Weight tying: the input embedding matrix and the output unembedding
-        # matrix are now the SAME torch.nn.Parameter object. Updates to one
-        # update the other. Standard in GPT-2 and most modern LLMs — saves
-        # vocab_size * d_model parameters (~4M with your config).
+        # matrix are the SAME Parameter. Counts once in num_params() and trains
+        # in lockstep.
         self.head.weight = self.embedding.tok.table.weight
+
+        self._apply_scaled_init()
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         x = self.embedding(ids)  # (B, T) -> (B, T, d_model)
@@ -60,6 +67,19 @@ class MiniGPT(nn.Module):
         x = self.ln_f(x)  # final layer norm
         logits = self.head(x)  # (B, T, d_model) -> (B, T, vocab_size)
         return logits
+    
+    def _apply_scaled_init(self):
+        """
+        GPT-2 § 2.3: rescale the std of every projection that writes into the
+        residual stream (attn out_proj and SwiGLU down_proj) by 1/sqrt(2*n_layers).
+        Keeps residual activations from blowing up as depth grows.
+        """
+        import math
+        scaled_std = 0.02 / math.sqrt(2 * self.cfg.n_layers)
+        for block in self.blocks:
+            nn.init.normal_(block.attn.out_proj.weight, mean=0.0, std=scaled_std)
+            nn.init.normal_(block.ff.w_down.weight,     mean=0.0, std=scaled_std)
+        
     
     def num_params(self) -> int:
         """

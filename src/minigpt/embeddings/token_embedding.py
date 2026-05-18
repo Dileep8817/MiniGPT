@@ -7,7 +7,6 @@
 # Output: (batch, seq_len, d_model) float vectors
 # ─────────────────────────────────────────────────────────────────────────────
 
-import math
 import torch
 import torch.nn as nn
 
@@ -26,8 +25,7 @@ class TokenEmbedding(nn.Module):
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model = d_model
-        self.scale = math.sqrt(d_model)
- 
+
         self.table = nn.Embedding(vocab_size, d_model, padding_idx=pad_id)
         nn.init.normal_(self.table.weight, mean=0.0, std=0.02)
         with torch.no_grad():
@@ -35,7 +33,7 @@ class TokenEmbedding(nn.Module):
  
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         # token_ids: (B, T) → (B, T, d_model)
-        return self.table(token_ids) * self.scale
+        return self.table(token_ids) 
  
     def __repr__(self) -> str:
         n = sum(p.numel() for p in self.parameters())

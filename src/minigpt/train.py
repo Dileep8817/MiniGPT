@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import csv
 import math, os, time
-from xml.parsers.expat import model
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -53,7 +52,7 @@ def split_dataset(full_ds: CorpusDataset, val_ratio: float):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, max_batches=20):
+def evaluate(model, loader, device, max_batches=100):
     model.eval()
     losses = []
     for i, (x, y) in enumerate(loader):
@@ -88,11 +87,24 @@ def main():
     full_ds = CorpusDataset.from_config(cfg, tokenizer)
     train_ds, val_ds = split_dataset(full_ds, cfg.val_split)
 
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True,  drop_last=True)
-    val_loader   = DataLoader(val_ds,   batch_size=cfg.batch_size, shuffle=False, drop_last=True)
+    # pin_memory is a no-op on MPS (Apple Silicon uses unified memory); enable
+    # only on CUDA. num_workers=2 lets data prep overlap with GPU compute.
+    pin = (device.type == "cuda")
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True,
+                              drop_last=True, pin_memory=pin, num_workers=2)
+    val_loader   = DataLoader(val_ds,   batch_size=cfg.batch_size, shuffle=False,
+                              drop_last=True, pin_memory=pin, num_workers=2)
     print(f"  [train] train={len(train_ds):,} val={len(val_ds):,}")
 
     model = MiniGPT(cfg).to(device)
+    # torch.compile gives a small speedup on MPS in PyTorch 2.x; "default"
+    # mode skips CUDA-graph-specific optimizations that warn on MPS.
+    if hasattr(torch, "compile"):
+        try:
+            model = torch.compile(model, mode="default")
+            print("  [train] torch.compile enabled")
+        except Exception as e:
+            print(f"  [train] torch.compile unavailable: {e}")
     model.num_params()
 
     optimizer = torch.optim.AdamW(
@@ -122,6 +134,12 @@ def main():
     optimizer.zero_grad(set_to_none=True)
     t0 = time.time()
 
+    val_loss0 = evaluate(model, val_loader, device, max_batches=100)
+    print(f"  [train] step 0 val_loss (random init / resume) = {val_loss0:.4f}")
+    log_writer.writerow([start_step, "", f"{val_loss0:.6f}", ""])
+    log_file.flush()
+    model.train()
+
     for step in range(start_step, cfg.max_steps):
         accum_loss = 0.0
         for _ in range(cfg.grad_accum_steps):
@@ -131,19 +149,22 @@ def main():
                 x, y = next(data_iter)
             x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
 
-            ctx = torch.autocast(device_type=device.type, dtype=torch.bfloat16) if use_amp else torch.no_grad().__class__.__call__(torch.no_grad)
             if use_amp:
                 with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                     logits = model(x)
-                    loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1)) / cfg.grad_accum_steps
+                    loss = F.cross_entropy(
+                        logits.reshape(-1, logits.size(-1)), y.reshape(-1)
+                    ) / cfg.grad_accum_steps
             else:
                 logits = model(x)
-                loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1)) / cfg.grad_accum_steps
+                loss = F.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)), y.reshape(-1)
+                ) / cfg.grad_accum_steps
 
             loss.backward()
             accum_loss += loss.item()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+        gnorm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
         lr = lr_at_step(step, cfg.warmup_steps, cfg.max_steps, cfg.max_lr, cfg.min_lr)
         for pg in optimizer.param_groups: pg["lr"] = lr
         optimizer.step()
@@ -153,7 +174,7 @@ def main():
             dt = time.time() - t0
             tok = cfg.batch_size * cfg.grad_accum_steps * (cfg.context_len - 1)
             tps = (tok * cfg.log_every) / max(dt, 1e-9) if step > start_step else 0.0
-            print(f"step {step:>5} | loss {accum_loss:.4f} | lr {lr:.2e} | tok/s {tps:>7,.0f}")
+            print(f"step {step:>5} | loss {accum_loss:.4f} | lr {lr:.2e} | gnorm {gnorm:.2f} | tok/s {tps:>7,.0f}")
             log_writer.writerow([step, f"{accum_loss:.6f}", "", f"{lr:.6e}"])
             log_file.flush()
             t0 = time.time()
@@ -168,6 +189,11 @@ def main():
         if step > start_step and step % cfg.save_every == 0:
             save_checkpoint(model, optimizer, step, cfg,
                             os.path.join(cfg.checkpoint_dir, f"step_{step:06d}.pt"))
+
+    final_val = evaluate(model, val_loader, device, max_batches=200)
+    print(f"  [train] FINAL val_loss = {final_val:.4f}")
+    log_writer.writerow([cfg.max_steps, "", f"{final_val:.6f}", ""])
+    log_file.flush()
 
     save_checkpoint(model, optimizer, cfg.max_steps, cfg,
                     os.path.join(cfg.checkpoint_dir, f"step_{cfg.max_steps:06d}.pt"))
