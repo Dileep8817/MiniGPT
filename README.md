@@ -251,7 +251,7 @@ src/minigpt/  config.py (all hyperparameters) · tokenizer/ (custom BPE)
               rms_norm, feed_forward, transformer_block, gpt)
               data/dataset.py · train.py · generate.py
 scripts/      build_corpus.py, plot_loss.py, plot_params.py
-tests/        pytest suite: tokenizer, model, dataset, generation
+tests/        pytest suite: tokenizer, model, dataset, generation, train
 logs/         training CSVs from both runs · figures/ the plots above
 ```
 
