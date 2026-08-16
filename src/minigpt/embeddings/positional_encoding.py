@@ -1,7 +1,6 @@
 # attention is permutation-invariant, so position has to be injected somewhere.
 # these two variants back the v1 baseline; v2 uses rope inside attention instead.
 
-import math
 import torch
 import torch.nn as nn
 
