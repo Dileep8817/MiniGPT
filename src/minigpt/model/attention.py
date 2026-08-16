@@ -3,17 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class CausalMultiHeadAttention(nn.Module):
-    """
-    Multi-head causal self-attention with:
-      * RoPE applied to Q and K (passed in by the parent block)
-      * F.scaled_dot_product_attention (uses MPS/CUDA fast kernels)
-      * No bias on projections (Llama convention)
-      * Internal attention dropout via SDPA's dropout_p (training only)
-      * Residual dropout after out_proj
-
-    Input:  (B, T, d_model)
-    Output: (B, T, d_model)
-    """
+    # no bias on the projections (llama convention)
     def __init__(
         self,
         d_model: int,
@@ -39,7 +29,7 @@ class CausalMultiHeadAttention(nn.Module):
         nn.init.normal_(self.q_proj.weight,   mean=0.0, std=0.02)
         nn.init.normal_(self.k_proj.weight,   mean=0.0, std=0.02)
         nn.init.normal_(self.v_proj.weight,   mean=0.0, std=0.02)
-        # out_proj gets the GPT-2 scaled init applied later in MiniGPT.
+        # out_proj is re-initialised with the scaled std in MiniGPT
         nn.init.normal_(self.out_proj.weight, mean=0.0, std=0.02)
 
         self.resid_dropout = nn.Dropout(dropout)
@@ -52,6 +42,7 @@ class CausalMultiHeadAttention(nn.Module):
         K = self.k_proj(x).view(B, T, h, d_h).transpose(1, 2)
         V = self.v_proj(x).view(B, T, h, d_h).transpose(1, 2)
 
+        # rope on q,k then fused causal SDPA — never materialises (B, h, T, T)
         Q, K = self.rotary(Q, K)
 
         out = F.scaled_dot_product_attention(
