@@ -1,14 +1,3 @@
-# DATASET
-#
-# Wraps a tokenized corpus as a sliding-window dataset for next-token
-# language modeling.
-#
-# The full corpus is tokenized ONCE on disk-load and held in memory as a
-# single 1D LongTensor of token IDs. Each training example is a sliding
-# window of length context_len; (x, y) are the input/target pair where
-# y is x shifted right by one position.
-# ────────────────────────────────────────────────────────────────────────
-
 from __future__ import annotations
 
 import os
@@ -21,14 +10,8 @@ from minigpt.tokenizer.create_tokenizer import Tokenizer
 from minigpt.tokenizer.train_tokenizer import load_trained_tokenizer
 
 class CorpusDataset(Dataset):
-    """
-    Sliding-window dataset over a tokenized text corpus.
-    __getitem__(i) returns (x, y) where:
-        chunk = ids[i : i + context_len]
-        x     = chunk[:-1]   # positions 0 .. T-1
-        y     = chunk[1:]    # positions 1 .. T   (next-token targets)
-    Both x and y have length context_len.
-    """
+    # the whole corpus lives in memory as one 1D LongTensor of ids; each item
+    # is a sliding window where y is x shifted right by one
     def __init__(
             self,
             corpus_path: str,
@@ -41,6 +24,7 @@ class CorpusDataset(Dataset):
         self.corpus_path = corpus_path
         self.context_len = context_len
 
+        # cache is stale if the corpus was rewritten after it
         cache_path = corpus_path + ".tokens.pt"
         cache_valid = (
             cache
@@ -68,11 +52,8 @@ class CorpusDataset(Dataset):
 
     @staticmethod
     def _encode_file(path: str, tokenizer: Tokenizer) -> torch.Tensor:
-        """
-        Encode one document per line, with <EOS> between documents so the
-        model learns boundaries. Streams line-by-line to keep memory low
-        and provide progress feedback (BPE encoding is slow in pure Python).
-        """
+        # one doc per line with <EOS> between them so boundaries are learnable.
+        # streamed line by line because pure-python BPE encoding is slow
         ids: list[int] = []
         with open(path, "r", encoding="utf-8") as f:
             for line_no, line in enumerate(f, start = 1):
@@ -85,11 +66,9 @@ class CorpusDataset(Dataset):
         return torch.tensor(ids, dtype=torch.long)
 
     def __len__(self) -> int:
-        # Total number of (x, y) pairs is total tokens minus context length
         return len(self.ids) - self.context_len
 
     def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
-        # Get a sliding window of tokens for input (x) and target (y)
         chunk = self.ids[i : i + self.context_len + 1]
         x = chunk[: -1]
         y = chunk[1 : ]
@@ -101,7 +80,6 @@ class CorpusDataset(Dataset):
         cfg: LLMConfig,
         tokenizer: Tokenizer | None = None
     ) -> "CorpusDataset":
-        """Build dataset from cfg. Loads the trained tokenizer if not given."""
         if tokenizer is None:
             tokenizer = load_trained_tokenizer(cfg)   # also updates cfg.vocab_size
         return cls(
@@ -145,5 +123,3 @@ if __name__ == "__main__":
     assert logits.shape == (4, T_expected, cfg.vocab_size)
     print(f"  [dataset] Model forward on batch OK: logits={tuple(logits.shape)}")
     print("CorpusDataset: all tests passed.")
-
-
