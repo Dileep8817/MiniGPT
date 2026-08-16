@@ -32,8 +32,8 @@ class LLMConfig:
     checkpoint_dir:  str   = "checkpoints/"
 
     # training
-    batch_size:          int   = 32     # was 16
-    grad_accum_steps:    int   = 2      # was 4 — keeps effective batch = 64 unchanged
+    batch_size:          int   = 32
+    grad_accum_steps:    int   = 2      # effective batch = 64
     max_steps:           int   = 2000
     warmup_steps:        int   = 100
     max_lr:              float = 3e-4
