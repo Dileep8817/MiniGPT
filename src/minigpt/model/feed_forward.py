@@ -6,17 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class SwiGLU(nn.Module):
-    """
-    Position-wise SwiGLU feed-forward (Llama-style).
-    Replaces the GELU MLP with a gated linear unit:
-        FFN(x) = (silu(W_gate x) * (W_up x)) @ W_down
-    SwiGLU uses 3 matrices instead of GELU's 2. To keep total parameter
-    count comparable to a 2x GELU FFN at d_ff = 4 * d_model, choose
-    d_ff ~= (8/3) * d_model. For d_model = 512 the calling code uses
-    d_ff = 1408 (multiple of 64, hardware-friendly).
-    Biases are removed (Llama convention) — no quality cost, slightly
-    faster, fewer parameters.
-    """
+    # gated ffn: silu(w_gate x) * (w_up x) -> w_down. 3 matrices, so callers
+    # pick d_ff ~= 8/3 * d_model to stay near a 4x GELU ffn's param count
     def __init__(self, d_model: int, d_ff: int, dropout:float = 0.1):
         super().__init__()
 
@@ -39,6 +30,5 @@ class SwiGLU(nn.Module):
         gated = F.silu(self.w_gate(x)) * self.w_up(x)
         return self.dropout(self.w_down(gated))
     
-# Backwards-compatible alias so transformer_block.py doesn't need to change
-# its import name even though the implementation is now SwiGLU.
+# alias kept so transformer_block.py imports the same name as before
 FeedForward = SwiGLU
