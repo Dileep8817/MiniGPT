@@ -8,18 +8,13 @@ from minigpt.embeddings.positional_encoding import (
 from minigpt.embeddings.token_embedding import TokenEmbedding
 
 class GPTEmbedding(nn.Module):
-    """
-    Token embedding + positional encoding + dropout.
-    This is the input to transformer block 0.
-
-    Output shape: (B, T, d_model)
-    """
+    # token embedding + optional positional encoding + dropout -> (B, T, d_model)
     def __init__(self, vocab_size: int, context_len: int, d_model: int, 
                  dropout: float, pos_type: str = "learned"):
         super().__init__()
         self.tok = TokenEmbedding(vocab_size, d_model)
         if pos_type == "rope":
-            # RoPE is applied inside attention, not added here.
+            # rope is applied to q,k inside attention, nothing to add here
             self.pos = None
         elif pos_type == "learned":
             self.pos = LearnedPositionalEncoding(context_len, d_model)
@@ -35,7 +30,6 @@ class GPTEmbedding(nn.Module):
     
     @classmethod
     def from_config(cls, cfg) -> "GPTEmbedding":
-        """Construct directly from LLMConfig instance."""
         return cls(
             vocab_size=cfg.vocab_size,
             context_len=cfg.context_len,
@@ -45,10 +39,8 @@ class GPTEmbedding(nn.Module):
         )
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
-        # ids: (B, T) — token IDs
-        # tok(ids): (B, T, d_model)
-        # pos(T):      (T, d_model) — broadcasts across batch
-        _, T = ids.shape    # batch size isn't needed
+        # ids: (B, T) -> (B, T, d_model); pos(T) is (T, d_model) and broadcasts
+        _, T = ids.shape
         tok = self.tok(ids)
         if self.pos is not None:
             tok = tok + self.pos(T)
