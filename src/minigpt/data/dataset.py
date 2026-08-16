@@ -95,31 +95,10 @@ class CorpusDataset(Dataset):
         )
 
 if __name__ == "__main__":
-    from torch.utils.data import DataLoader
     from minigpt.config import cfg
+
+    # quick demo — the real assertions live in tests/test_dataset.py
     ds = CorpusDataset.from_config(cfg)
     print(ds)
     x, y = ds[0]
-    T_expected = cfg.context_len
-    assert x.shape == (T_expected,), f"x shape: {x.shape}"
-    assert y.shape == (T_expected,), f"y shape: {y.shape}"
-    assert torch.equal(y[:-1], x[1:]), "y must be x shifted by one"
-    assert x.dtype == torch.long and y.dtype == torch.long, \
-        "Token IDs must be int64 for nn.Embedding"
-    assert len(ds) == len(ds.ids) - cfg.context_len
-    assert ds.ids.min().item() >= 0
-    assert ds.ids.max().item() < cfg.vocab_size, (
-        f"Token ID {ds.ids.max().item()} >= vocab_size {cfg.vocab_size}. "
-        "Did you reload the trained tokenizer to update cfg.vocab_size?"
-    )
-    loader = DataLoader(ds, batch_size=4, shuffle=True, num_workers=0)
-    xb, yb = next(iter(loader))
-    assert xb.shape == (4, T_expected)
-    assert yb.shape == (4, T_expected)
-    print(f"  [dataset] Batch OK: x={tuple(xb.shape)}, y={tuple(yb.shape)}")
-    from minigpt.model.gpt import MiniGPT
-    model = MiniGPT(cfg)
-    logits = model(xb)
-    assert logits.shape == (4, T_expected, cfg.vocab_size)
-    print(f"  [dataset] Model forward on batch OK: logits={tuple(logits.shape)}")
-    print("CorpusDataset: all tests passed.")
+    print(f"x: {tuple(x.shape)}  y: {tuple(y.shape)}")
