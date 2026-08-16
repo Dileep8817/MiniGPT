@@ -74,65 +74,10 @@ class MiniGPT(nn.Module):
 
 if __name__ == "__main__":
     from minigpt.config import cfg
-    
+
+    # quick demo — the real assertions live in tests/test_model.py
     model = MiniGPT(cfg)
     print(model)
     model.num_params()
-    
-    # Forward pass shape
-    ids = torch.randint(0, cfg.vocab_size, (4, 32))
-    logits = model(ids)
-    assert logits.shape == (4, 32, cfg.vocab_size), f"shape: {logits.shape}"
-    
-    # Variable T
-    for T in [1, 16, cfg.context_len]:
-        ids = torch.randint(0, cfg.vocab_size, (2, T))
-        assert model(ids).shape == (2, T, cfg.vocab_size)
-    
-    # Weight tying — must be the SAME tensor object, not just equal values
-    assert model.head.weight is model.embedding.tok.table.weight, \
-        "Weight tying failed — assignment didn't share the underlying Parameter"
-    
-    # Sanity check: dedup in .parameters() is actually happening
-    n_dedup = sum(p.numel() for p in model.parameters())
-    n_naive = (sum(p.numel() for p in model.embedding.parameters())
-               + sum(sum(p.numel() for p in b.parameters()) for b in model.blocks)
-               + sum(p.numel() for p in model.ln_f.parameters())
-               + sum(p.numel() for p in model.head.parameters()))
-    diff = n_naive - n_dedup
-    expected_diff = cfg.vocab_size * cfg.d_model
-    assert diff == expected_diff, \
-        f"dedup mismatch: naive - dedup = {diff:,}, expected {expected_diff:,}"
-    
-    # Gradient flow — verify both the tied weight and a deep block param get gradients
-    model.train()
     ids = torch.randint(0, cfg.vocab_size, (2, 16))
-    logits = model(ids)
-    loss = logits.sum()
-    loss.backward()
-    assert model.embedding.tok.table.weight.grad is not None
-    assert model.blocks[0].attn.q_proj.weight.grad is not None
-    
-    # Causality — most important test for an autoregressive LM
-    model.eval()
-    ids1 = torch.randint(0, cfg.vocab_size, (1, 16))
-    ids2 = ids1.clone()
-    ids2[0, -1] = (ids1[0, -1] + 1) % cfg.vocab_size  # change only the LAST token
-    with torch.no_grad():
-        l1 = model(ids1)
-        l2 = model(ids2)
-    # All earlier positions' logits must be IDENTICAL — they can't see the future
-    assert torch.allclose(l1[:, :-1, :], l2[:, :-1, :], atol=1e-5), \
-        "CAUSALITY BROKEN: changing the last token affected earlier logits"
-    # And the last position SHOULD differ (otherwise the model is ignoring input)
-    assert not torch.allclose(l1[:, -1, :], l2[:, -1, :])
-    
-    # Verify model can compute loss against targets (sanity for training)
-    targets = torch.randint(0, cfg.vocab_size, (2, 16))
-    loss = nn.functional.cross_entropy(
-        logits.reshape(-1, cfg.vocab_size),
-        targets.reshape(-1),
-    )
-    assert loss.dim() == 0 and loss.item() > 0
-    
-    print("All MiniGPT tests passed.")
+    print(f"logits: {tuple(model(ids).shape)}")
