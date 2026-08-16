@@ -1,9 +1,9 @@
 from __future__ import annotations
+import os
 import re 
 import json
 import unicodedata
 from collections import Counter
-from pathlib import Path
 from minigpt.config import SPECIAL_TOKENS
 
 # punctuation and operators stay single tokens, never merged
@@ -318,7 +318,6 @@ class Tokenizer:
         return self.itos.get(idx, "<UNK>")
 
     def save(self, path: str) -> None:
-        import os
         dirpath = os.path.dirname(path)
         if dirpath:
             os.makedirs(dirpath, exist_ok=True)
