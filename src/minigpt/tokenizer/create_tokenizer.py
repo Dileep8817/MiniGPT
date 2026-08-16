@@ -1,8 +1,3 @@
-# PART 1 — TOKENIZER 
-
-# Responsibility: define the MathTokenizer class — the object that converts
-# raw text strings into integer IDs and back again.
-
 from __future__ import annotations
 import re 
 import json
