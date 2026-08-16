@@ -43,13 +43,9 @@ def lr_at_step(step, warmup, total, max_lr, min_lr):
 def split_dataset(full_ds: CorpusDataset, val_ratio: float):
     # contiguous tail split — val is the last val_ratio of the token stream
     n = int((1 - val_ratio) * len(full_ds.ids))
-    def shallow(ids):
-        ds = object.__new__(CorpusDataset)
-        ds.context_len = full_ds.context_len
-        ds.corpus_path = full_ds.corpus_path
-        ds.ids = ids
-        return ds
-    return shallow(full_ds.ids[:n]), shallow(full_ds.ids[n:])
+    def view(ids):
+        return CorpusDataset.from_ids(ids, full_ds.context_len, full_ds.corpus_path)
+    return view(full_ds.ids[:n]), view(full_ds.ids[n:])
 
 
 @torch.no_grad()

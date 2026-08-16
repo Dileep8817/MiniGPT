@@ -75,6 +75,25 @@ class CorpusDataset(Dataset):
         return x, y
     
     @classmethod
+    def from_ids(
+        cls,
+        ids: torch.Tensor,
+        context_len: int,
+        corpus_path: str = ""
+    ) -> "CorpusDataset":
+        # for slicing an already-encoded stream (train/val split) without
+        # re-reading or re-encoding the corpus
+        if len(ids) <= context_len:
+            raise ValueError(
+                f"Got {len(ids):,} tokens, need more than context_len={context_len}"
+            )
+        ds = cls.__new__(cls)
+        ds.ids = ids
+        ds.context_len = context_len
+        ds.corpus_path = corpus_path
+        return ds
+
+    @classmethod
     def from_config(
         cls,
         cfg: LLMConfig,
