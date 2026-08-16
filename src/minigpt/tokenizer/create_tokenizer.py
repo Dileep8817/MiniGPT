@@ -40,8 +40,6 @@ class Tokenizer:
 
         self.bpe_merges: list[tuple[str, str]] = []
 
-        self._multi_char: list[str] = []
-
     def normalize(self, text: str) -> str:
         # NFC folds equivalent unicode forms, e.g. "é" as one codepoint
         text = unicodedata.normalize("NFC", text)
@@ -178,10 +176,6 @@ class Tokenizer:
         self.stoi = {tok: idx for idx, tok in enumerate(all_tokens)}
         self.itos = {idx: tok for idx, tok in enumerate(all_tokens)}
         self.vocab_size = len(all_tokens)
-        self._multi_char = sorted(
-            [t for t in self.stoi if len(t) > 1],
-            key=len, reverse=True
-        )
 
         print(f"  [tokenizer] Vocabulary built — {self.vocab_size:,} tokens")
 
@@ -339,10 +333,6 @@ class Tokenizer:
         self.lowercase  = data.get("lowercase", False)
         # json gives back lists; merges must be tuples to compare against pairs
         self.bpe_merges = [tuple(pair) for pair in data.get("bpe_merges", [])]
-        self._multi_char = sorted(
-            [t for t in self.stoi if len(t) > 1],
-            key=len, reverse=True
-        )
         print(f"  [tokenizer] Loaded ({self.vocab_size:,} tokens) ← {path}")
 
     def __repr__(self) -> str:
