@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 
@@ -49,7 +51,6 @@ class MiniGPT(nn.Module):
     def _apply_scaled_init(self):
         # gpt-2 §2.3: shrink the projections that write into the residual
         # stream by 1/sqrt(2*n_layers) so activations don't grow with depth
-        import math
         scaled_std = 0.02 / math.sqrt(2 * self.cfg.n_layers)
         for block in self.blocks:
             nn.init.normal_(block.attn.out_proj.weight, mean=0.0, std=scaled_std)
