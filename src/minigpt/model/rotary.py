@@ -3,15 +3,7 @@ import torch
 import torch.nn as nn
 
 class RotaryEmbedding(nn.Module):
-    """
-    Rotary Positional Embedding (RoPE) — GPT-NeoX / Llama variant.
-
-    Precomputes cos/sin tables of shape (max_seq_len, d_head). At forward,
-    it rotates Q and K in pairs along the head dimension, encoding
-    position multiplicatively rather than additively. RoPE has zero
-    learnable parameters and extrapolates better to unseen sequence
-    lengths than learned positional embeddings.
-    """
+    # rope: precompute cos/sin, rotate q,k in pairs. zero learnable params
     def __init__(self, d_head: int, max_seq_len: int, base: float = 10000.0):
         super().__init__()
         assert d_head % 2 == 0, "RoPE requires an even d_head"
