@@ -62,8 +62,14 @@ def evaluate(model, loader, device, max_batches=100):
     return sum(losses) / max(len(losses), 1)
 
 
+def unwrap(model):
+    # torch.compile wraps the module, and its state_dict keys are all prefixed
+    # with _orig_mod. — checkpoints must stay loadable by plain MiniGPT
+    return getattr(model, "_orig_mod", model)
+
+
 def save_checkpoint(model, optimizer, step, cfg, path):
-    torch.save({"model": model.state_dict(),
+    torch.save({"model": unwrap(model).state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "step": step, "cfg": cfg.__dict__}, path)
     print(f"  [ckpt] saved → {path}")
@@ -71,7 +77,7 @@ def save_checkpoint(model, optimizer, step, cfg, path):
 
 def load_checkpoint(model, optimizer, path, device):
     ckpt = torch.load(path, map_location=device, weights_only=False)
-    model.load_state_dict(ckpt["model"])
+    unwrap(model).load_state_dict(ckpt["model"])
     optimizer.load_state_dict(ckpt["optimizer"])
     return ckpt["step"]
 
