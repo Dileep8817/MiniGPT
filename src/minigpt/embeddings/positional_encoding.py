@@ -1,21 +1,12 @@
-# EMBEDDING LAYER 
-#
-# Self-attention is permutation-invariant — without position info,
-# "dog bites man" = "man bites dog". Positional encoding fixes this
-# by injecting a unique signal per position into the token vectors.
-#
-# Two implementations:
-#   LEARNED      — each position has its own trainable vector (GPT-2 style)
-#   SINUSOIDAL   — fixed sin/cos encoding from original Transformer paper
-# ─────────────────────────────────────────────────────────────────────────────
+# attention is permutation-invariant, so position has to be injected somewhere.
+# these two variants back the v1 baseline; v2 uses rope inside attention instead.
 
 import math
 import torch
 import torch.nn as nn
 
 class LearnedPositionalEncoding(nn.Module):
-    """One trainable vector per position 0 … context_len-1."""
-    
+    # one trainable vector per position 0 .. context_len-1 (gpt-2 style)
     def __init__(self, context_len: int, d_model: int):
         super().__init__()
         self.table = nn.Embedding(context_len, d_model)
@@ -28,11 +19,7 @@ class LearnedPositionalEncoding(nn.Module):
         return self.table(pos) # (T, d_model)
     
 class SinusoidalPositionalEncoding(nn.Module):
-    """
-    Fixed sin/cos encoding — no trainable parameters.
-    PE(pos, 2i)   = sin(pos / 10000^(2i/d_model))
-    PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))
-    """
+    # fixed sin/cos table from the original transformer paper, no parameters
     def __init__(self, context_len: int, d_model: int):
         super().__init__()
         assert d_model % 2 == 0, "d_model must be even"
@@ -42,12 +29,10 @@ class SinusoidalPositionalEncoding(nn.Module):
             * (-torch.log(torch.tensor(10000.0)) / d_model)
         )
         pe = torch.zeros(context_len, d_model)
-        # fill even and odd columns separately; even columns with sin and odd columns with cos
+        # even columns get sin, odd columns get cos
         pe[:,0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer("pe", pe)
 
     def forward(self, seq_len: int):
         return self.pe[:seq_len]
-    
-
