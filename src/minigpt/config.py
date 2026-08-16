@@ -1,13 +1,8 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Central configuration — general-purpose LLM.
-# Every other module imports from here. Never hardcode values elsewhere.
-# ─────────────────────────────────────────────────────────────────────────────
+# every module reads hyperparams from here, nothing is hardcoded elsewhere
 
 from dataclasses import dataclass, field
 
-# ── Special tokens ────────────────────────────────────────────────────────────
-# Kept minimal for a general LLM. These always occupy the lowest IDs so
-# their positions are fixed regardless of what BPE learns.
+# these always take the lowest IDs so their positions are fixed whatever BPE learns
 SPECIAL_TOKENS = [
     "<PAD>",    # 0 — padding (fills short sequences in a batch)
     "<UNK>",    # 1 — unknown token (char not in vocab)
@@ -17,12 +12,12 @@ SPECIAL_TOKENS = [
 
 @dataclass
 class LLMConfig:
-    # ──── Tokenizer ──────────────────────────
+    # tokenizer
     vocab_size: int = 16500   # target BPE vocab size (updated after training)
     bpe_num_merges: int = 16000    # how many BPE merge rules to learn
     lowercase: bool = False # normalize to lowercase before tokenizing
 
-    # ── Architecture ──────────────────────────────────────────────────────────
+    # architecture
     context_len: int   = 512     # max tokens the model sees at once
     n_layers: int   = 6       # number of stacked transformer blocks
     n_heads: int   = 8       # attention heads (d_model must be divisible)
@@ -31,12 +26,12 @@ class LLMConfig:
     dropout: float = 0.1
     pos_type: str = "rope"
 
-    # ── Paths ─────────────────────────────────────────────────────────────────
+    # paths
     raw_data_path:   str   = "data/corpus.txt"
     tokenizer_path:  str   = "data/tokenizer.json"
     checkpoint_dir:  str   = "checkpoints/"
 
-    # ── Training ────────────────────────────────────────────────
+    # training
     batch_size:          int   = 32     # was 16
     grad_accum_steps:    int   = 2      # was 4 — keeps effective batch = 64 unchanged
     max_steps:           int   = 2000
@@ -53,7 +48,4 @@ class LLMConfig:
     use_grad_checkpoint: bool  = False
     use_sdpa:            bool  = True
 
-# ── Shared default instance ───────────────────────────────────────────────────
 cfg = LLMConfig()
-
-
