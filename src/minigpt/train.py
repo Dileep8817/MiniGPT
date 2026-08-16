@@ -102,10 +102,17 @@ def main():
     # "default" mode skips the cuda-graph passes that warn on MPS
     if hasattr(torch, "compile"):
         try:
-            model = torch.compile(model, mode="default")
+            compiled = torch.compile(model, mode="default")
+            # compile is lazy, so force it here — the same eval-mode shape the
+            # step-0 eval uses, otherwise a backend failure escapes this try
+            compiled.eval()
+            with torch.no_grad():
+                compiled(torch.zeros(cfg.batch_size, cfg.context_len,
+                                     dtype=torch.long, device=device))
+            model = compiled
             print("  [train] torch.compile enabled")
         except Exception as e:
-            print(f"  [train] torch.compile unavailable: {e}")
+            print(f"  [train] torch.compile unavailable, staying eager: {e}")
     model.num_params()
 
     optimizer = torch.optim.AdamW(
