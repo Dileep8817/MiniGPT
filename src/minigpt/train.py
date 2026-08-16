@@ -1,4 +1,3 @@
-"""End-to-end training loop for MiniGPT."""
 from __future__ import annotations
 
 import csv
@@ -20,7 +19,7 @@ def get_device() -> torch.device:
 
 
 def build_param_groups(model, weight_decay: float):
-    """Decay only 2D+ tensors. Excludes biases and LayerNorm gamma/beta."""
+    # decay 2D+ tensors only, so norms and biases stay out of weight decay
     decay, nodecay = [], []
     for _, p in model.named_parameters():
         if not p.requires_grad: continue
@@ -32,6 +31,7 @@ def build_param_groups(model, weight_decay: float):
 
 
 def lr_at_step(step, warmup, total, max_lr, min_lr):
+    # linear warmup then cosine decay to min_lr
     if step < warmup:           
         return max_lr * (step + 1) / warmup
     if step >= total:           
@@ -41,6 +41,7 @@ def lr_at_step(step, warmup, total, max_lr, min_lr):
 
 
 def split_dataset(full_ds: CorpusDataset, val_ratio: float):
+    # contiguous tail split — val is the last val_ratio of the token stream
     n = int((1 - val_ratio) * len(full_ds.ids))
     def shallow(ids):
         ds = object.__new__(CorpusDataset)
@@ -87,8 +88,7 @@ def main():
     full_ds = CorpusDataset.from_config(cfg, tokenizer)
     train_ds, val_ds = split_dataset(full_ds, cfg.val_split)
 
-    # pin_memory is a no-op on MPS (Apple Silicon uses unified memory); enable
-    # only on CUDA. num_workers=2 lets data prep overlap with GPU compute.
+    # pin_memory is a no-op on MPS (unified memory), so only enable it on cuda
     pin = (device.type == "cuda")
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True,
                               drop_last=True, pin_memory=pin, num_workers=2)
@@ -97,8 +97,7 @@ def main():
     print(f"  [train] train={len(train_ds):,} val={len(val_ds):,}")
 
     model = MiniGPT(cfg).to(device)
-    # torch.compile gives a small speedup on MPS in PyTorch 2.x; "default"
-    # mode skips CUDA-graph-specific optimizations that warn on MPS.
+    # "default" mode skips the cuda-graph passes that warn on MPS
     if hasattr(torch, "compile"):
         try:
             model = torch.compile(model, mode="default")
@@ -134,6 +133,7 @@ def main():
     optimizer.zero_grad(set_to_none=True)
     t0 = time.time()
 
+    # baseline eval so the random-init starting point is explicit, not inferred
     val_loss0 = evaluate(model, val_loader, device, max_batches=100)
     print(f"  [train] step 0 val_loss (random init / resume) = {val_loss0:.4f}")
     log_writer.writerow([start_step, "", f"{val_loss0:.6f}", ""])
@@ -174,6 +174,7 @@ def main():
             dt = time.time() - t0
             tok = cfg.batch_size * cfg.grad_accum_steps * (cfg.context_len - 1)
             tps = (tok * cfg.log_every) / max(dt, 1e-9) if step > start_step else 0.0
+            # gnorm is the earliest warning sign of instability
             print(f"step {step:>5} | loss {accum_loss:.4f} | lr {lr:.2e} | gnorm {gnorm:.2f} | tok/s {tps:>7,.0f}")
             log_writer.writerow([step, f"{accum_loss:.6f}", "", f"{lr:.6e}"])
             log_file.flush()
@@ -190,6 +191,7 @@ def main():
             save_checkpoint(model, optimizer, step, cfg,
                             os.path.join(cfg.checkpoint_dir, f"step_{step:06d}.pt"))
 
+    # the step > start_step guard above skips the last eval_every boundary
     final_val = evaluate(model, val_loader, device, max_batches=200)
     print(f"  [train] FINAL val_loss = {final_val:.4f}")
     log_writer.writerow([cfg.max_steps, "", f"{final_val:.6f}", ""])
