@@ -1,23 +1,3 @@
-# MINI GPT
-#
-# Stitches everything together into a working autoregressive language model.
-#
-#   ids (B, T)
-#       │
-#   GPTEmbedding (token + positional + dropout)
-#       │
-#   ┌───▼────┐
-#   │ block  │  × n_layers   (pre-norm: LN → attn → +res, LN → ffn → +res)
-#   └───┬────┘
-#       │
-#   final LayerNorm
-#       │
-#   linear head  (weight-tied to token embedding)
-#       │
-#       ▼
-#   logits (B, T, vocab_size)
-# ───────────────────────────────────────────────────────────────────────────
-
 import torch
 import torch.nn as nn
 
@@ -28,7 +8,6 @@ from minigpt.model.rotary import RotaryEmbedding
 from minigpt.model.rms_norm import RMSNorm
 
 class MiniGPT(nn.Module):
-    """A small GPT-style decoder-only language model."""
     def __init__(self, cfg: LLMConfig):
         super().__init__()
 
@@ -36,6 +15,7 @@ class MiniGPT(nn.Module):
         self.embedding = GPTEmbedding.from_config(cfg)
 
         d_head = cfg.d_model // cfg.n_heads
+        # one rotary table shared by every block
         self.rotary = RotaryEmbedding(d_head=d_head, max_seq_len=cfg.context_len)
 
         self.blocks = nn.ModuleList([
@@ -51,9 +31,7 @@ class MiniGPT(nn.Module):
         self.ln_f = RMSNorm(cfg.d_model)
         self.head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
         
-        # Weight tying: the input embedding matrix and the output unembedding
-        # matrix are the SAME Parameter. Counts once in num_params() and trains
-        # in lockstep.
+        # tie input embedding to output head — same Parameter, not a copy
         self.head.weight = self.embedding.tok.table.weight
 
         self._apply_scaled_init()
@@ -64,16 +42,13 @@ class MiniGPT(nn.Module):
         for block in self.blocks:
             x = block(x)  # (B, T, d_model) -> (B, T, d_model)
 
-        x = self.ln_f(x)  # final layer norm
+        x = self.ln_f(x)
         logits = self.head(x)  # (B, T, d_model) -> (B, T, vocab_size)
         return logits
     
     def _apply_scaled_init(self):
-        """
-        GPT-2 § 2.3: rescale the std of every projection that writes into the
-        residual stream (attn out_proj and SwiGLU down_proj) by 1/sqrt(2*n_layers).
-        Keeps residual activations from blowing up as depth grows.
-        """
+        # gpt-2 §2.3: shrink the projections that write into the residual
+        # stream by 1/sqrt(2*n_layers) so activations don't grow with depth
         import math
         scaled_std = 0.02 / math.sqrt(2 * self.cfg.n_layers)
         for block in self.blocks:
@@ -82,13 +57,7 @@ class MiniGPT(nn.Module):
         
     
     def num_params(self) -> int:
-        """
-        Total trainable parameter count.
-        head.weight is tied to embedding.tok.table.weight (same Parameter
-        object), and PyTorch's .parameters() iterator deduplicates by ID,
-        so the tied weight is counted exactly once — no manual subtraction
-        needed. We still print the would-be saving for visibility.
-        """
+        # .parameters() dedups by id, so the tied weight is counted once
         total = sum(p.numel() for p in self.parameters())
         n_tied = self.embedding.tok.table.weight.numel()
         print(f"MiniGPT: {total:,} parameters "
