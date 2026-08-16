@@ -1,8 +1,3 @@
-
-# Responsibility: pull raw text into memory from various sources.
-# For a general LLM this means: plain text files, Wikipedia dumps,
-# books, web-scraped content, or custom JSON datasets.
-
 from __future__ import annotations
 import os
 import json
@@ -48,7 +43,7 @@ def load_json(path: str, text_key: str = "text") -> list[str]:
             if item.strip():
                 docs.append(item.strip())
         elif isinstance(item, dict):
-            text = item.get(text_key, "").strip()   # FIX: was `.` instead of `,`
+            text = item.get(text_key, "").strip()
             if text:
                 docs.append(text)
     return docs
@@ -93,7 +88,7 @@ def generate_synthetic_text(n: int = 2000, seed: int = 42) -> list[str]:
 
     docs = []
     for _ in range(n):
-        # Vary dodcument length
+        # vary document length
         n_sentences = random.randint(2,6)
         sentences = []
         for _ in range(n_sentences):
