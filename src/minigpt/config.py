@@ -1,6 +1,6 @@
 # every module reads hyperparams from here, nothing is hardcoded elsewhere
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # these always take the lowest IDs so their positions are fixed whatever BPE learns
 SPECIAL_TOKENS = [
