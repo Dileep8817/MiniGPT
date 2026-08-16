@@ -67,7 +67,7 @@ def load_huggingface(dataset_name: str, split: str = "train",
     # note some datasets need a config name, e.g. ("wikitext", "wikitext-103-raw-v1")
     try:
         from datasets import load_dataset
-    except:
+    except ImportError:
         raise ImportError("Run: pip install datasets")
     
     ds = load_dataset(dataset_name, split=split)
